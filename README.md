@@ -1,5 +1,7 @@
 # rust-wasm4-mini-ecs
 
+https://kyren.github.io/2018/09/14/rustconf-talk.html
+
 A game written in Rust for the [WASM-4](https://wasm4.org) fantasy console.
 
 ## Building
