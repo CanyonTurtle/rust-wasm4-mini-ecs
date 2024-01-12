@@ -1,20 +1,12 @@
 
 
 
-// tune-able constants
-pub const MAX_N_ENTITIES: usize = 20;
 
 // You can use other types that usize / u64 if these are too large
 #[derive(Eq, PartialEq)]
 pub struct GenerationalIndex {
     index: usize,
     generation: u64,
-}
-
-impl GenerationalIndex {
-    pub fn index(&self) -> usize {
-        self.index
-    }
 }
 
 pub struct AllocatorEntry {
@@ -30,21 +22,25 @@ pub struct GenerationalIndexAllocator {
 
 pub struct AllocationFailed(());
 
+#[derive(Debug)]
 pub enum DeallocationError {
     IndexOOB,
     GenerationMismatch,
     AlreadyDeallocated
 }
 
-pub struct LiveLookupOOB(());
+// pub struct LiveLookupOOB(());
 
 impl GenerationalIndexAllocator {
+
     pub fn allocate(&mut self) -> Result<GenerationalIndex, AllocationFailed> {
         // try to find a free spot.
 
         match self.free.pop() {
             Some(index) => {
                 self.generation_counter += 1;
+                self.entries[index].generation = self.generation_counter;
+                self.entries[index].is_live = true;
                 Ok(GenerationalIndex{
                     index,
                     generation: self.generation_counter
@@ -57,7 +53,7 @@ impl GenerationalIndexAllocator {
 
 
     // Return index back to pool of available ones. This does NOT deallocate the resource itself
-    pub fn deallocate(&mut self, index: GenerationalIndex) -> Result<(), DeallocationError> {
+    pub fn deallocate(&mut self, index: &GenerationalIndex) -> Result<(), DeallocationError> {
         let i = index.index;
         if i >= self.entries.len() {
             Err(DeallocationError::IndexOOB)
@@ -72,13 +68,13 @@ impl GenerationalIndexAllocator {
         }
     }
     
-    pub fn is_live(&self, index: GenerationalIndex) -> Result<bool, LiveLookupOOB> {
-        if index.index >= self.entries.len() {
-            Err(LiveLookupOOB(()))
-        } else {
-            Ok(self.entries[index.index].is_live)
-        }
-    }
+    // pub fn is_live(&self, index: GenerationalIndex) -> Result<bool, LiveLookupOOB> {
+    //     if index.index >= self.entries.len() {
+    //         Err(LiveLookupOOB(()))
+    //     } else {
+    //         Ok(self.entries[index.index].is_live)
+    //     }
+    // }
 }
 
 pub struct ArrayEntry<T> {
@@ -118,7 +114,7 @@ impl<T> GenerationalIndexArray<T> {
             }
         }
     }
-    pub fn get_mut(&mut self, index: GenerationalIndex) -> Option<&mut T> {
+    pub fn get_mut(&mut self, index: &GenerationalIndex) -> Option<&mut T> {
         if index.index >= self.0.len() {
             None
         } else {
