@@ -92,7 +92,7 @@ pub struct IndexOOB(());
 impl<T> GenerationalIndexArray<T> {
     // Set the value for some generational index.  May overwrite past generation
     // values.
-    pub fn set(&mut self, index: GenerationalIndex, value: T) -> Result<(), IndexOOB> {
+    pub fn set(&mut self, index: &GenerationalIndex, value: T) -> Result<(), IndexOOB> {
         if index.index >= self.0.len() {
             Err(IndexOOB(()))
         } else {

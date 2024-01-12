@@ -5,6 +5,8 @@ mod ecs;
 use ecs::{Entity, GenerationalIndexAllocator, EntityMap, GenerationalIndexArray};
 use wasm4::*;
 
+use crate::ecs::{ArrayEntry, AllocatorEntry, MAX_N_ENTITIES};
+
 // Example usage of ECS
 struct PositionComponent{
     x: f32,
@@ -36,21 +38,31 @@ const SMILEY: [u8; 8] = [
 
 #[no_mangle]
 fn update() {
-    trace("begin");
+    // trace("begin");
     let game_state: &mut GameState;
     unsafe {
         match GAME_STATE {
             None => {
                 trace("Game state is none");
-                for _ in 0..MAX_N_ENTITIES
+                let mut entries = Vec::new();
+                let mut free = Vec::new();
+                let mut pos_comp_items = Vec::new();
+                for i in 0..MAX_N_ENTITIES {
+                    entries.push(AllocatorEntry {
+                        is_live: false,
+                        generation: 0,
+                    });
+                    free.push(i);
+                    pos_comp_items.push(None);
+                }
                 GAME_STATE = Some(GameState{
                     entity_allocator: GenerationalIndexAllocator{
-                        entries: Vec::new(Alloc),
-                        free: vec![0, 1, 2, 3, 4],
+                        entries,
+                        free,
                         generation_counter: 0
                     },
                     position_components: GenerationalIndexArray{
-                        0: Vec::new()
+                        0: pos_comp_items
                     },
                     players: Vec::new()
                 });
@@ -59,6 +71,12 @@ fn update() {
                     match gs.entity_allocator.allocate() {
                         Ok(index) => {
                             gs.players.push(index);
+                            match gs.position_components.set(&gs.players[0], PositionComponent{x: 10.0, y: 10.0}) {
+                                Err(_) => {
+                                    trace("Pos component set fail")
+                                },
+                                _ => {}
+                            }
                         },
                         Err(_) => {
                             trace("allocate fail");
@@ -80,13 +98,14 @@ fn update() {
         }
     }
 
-    trace("got game state");
+    // trace("got game state");
     // game_state.position_components.get(&game_state.players[0]);
 
     fn draw_players_system(game_state: &GameState) {
         for player in &game_state.players {
-            trace("trying player");
+            // trace("trying player");
             if let Some(pos) = game_state.position_components.get(&player) {
+                trace("got comp");
                 blit(&SMILEY, pos.x as i32, pos.y as i32, 8, 8, BLIT_1BPP);
             }
         }
