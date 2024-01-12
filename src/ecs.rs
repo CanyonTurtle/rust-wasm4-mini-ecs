@@ -1,4 +1,4 @@
-
+// Credit for this implementation outline to Kyren https://kyren.github.io/2018/09/14/rustconf-talk.html
 
 
 
@@ -84,7 +84,9 @@ pub struct ArrayEntry<T> {
 
 // An associative array from GenerationalIndex to some Value T.
 pub struct GenerationalIndexArray<T>(pub Vec<Option<ArrayEntry<T>>>);
+
 pub struct IndexOOB(());
+
 impl<T> GenerationalIndexArray<T> {
     // Set the value for some generational index.  May overwrite past generation
     // values.
@@ -114,6 +116,8 @@ impl<T> GenerationalIndexArray<T> {
             }
         }
     }
+
+    // Get the value of some generational index. The generation must match.
     pub fn get_mut(&mut self, index: &GenerationalIndex) -> Option<&mut T> {
         if index.index >= self.0.len() {
             None
@@ -140,3 +144,4 @@ pub type Entity = GenerationalIndex;
 
 // Map of Entity to some type T
 pub type EntityMap<T> = GenerationalIndexArray<T>;
+

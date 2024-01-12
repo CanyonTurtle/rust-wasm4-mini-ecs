@@ -9,8 +9,8 @@ use wasm4::*;
 
 use crate::ecs::AllocatorEntry;
 
-// tune-able constant: how many entities we can have
-pub const MAX_N_ENTITIES: usize = 20;
+// tune-able constant: how many entities we have.
+pub const MAX_N_ENTITIES: usize = 120;
 
 
 // Example ECS component
@@ -30,7 +30,9 @@ struct PhysicsComponent {
 }
 
 // An empty component just to tag something as being involved in a given system.
-struct RainingSmileyComponent {}
+struct RainingSmileyComponent {
+    countdown_msec: u64,
+}
 
 // List your components in this struct. Each entity has one of each (each entry is optional).
 struct EntityComponents {
@@ -82,7 +84,7 @@ fn update() {
                 let vy = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 5.0 - 2.5;
                 let collision_elasticity = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 0.25 + 0.6;
                 let gravity_mult = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 0.02 + 0.18;
-
+                let countdown_msec = 3 * 60 + ((gs.resources.rng.next() % (3 * 60)));
 
                 if let Err(_) = gs.entity_components.kinematics.set(&gs.entities.last().unwrap(), Kinematics{x , y, vx, vy}) {
                     trace("Pos component set fail")
@@ -91,7 +93,7 @@ fn update() {
                 if let Err(_) = gs.entity_components.physics.set(&gs.entities.last().unwrap(), PhysicsComponent{gravity_mult, w: 8.0, h: 8.0, collision_elasticity}) {
                     trace("Phys component set fail")
                 }
-                if let Err(_) = gs.entity_components.raining_smiley.set(&gs.entities.last().unwrap(), RainingSmileyComponent{}) {
+                if let Err(_) = gs.entity_components.raining_smiley.set(&gs.entities.last().unwrap(), RainingSmileyComponent{countdown_msec}) {
                     trace("Phys component set fail")
                 }
             },
@@ -146,7 +148,7 @@ fn update() {
 
                 // Example usage on startup: allocate an entity and give it a position.
                 if let Some(gs) = &mut STATIC_ECS_DATA {
-                    for _ in 0..20 {
+                    for _ in 0..MAX_N_ENTITIES {
                         add_smiley_ball(gs);
                     }
                 }
@@ -200,12 +202,14 @@ fn update() {
                     
                     if pos.x + phys.w >= 160.0 {
                         pos.vx *= -phys.collision_elasticity;
+                        pos.x = 160.0 - phys.w;
                     } else if pos.x + pos.vx < 0.0 {
                         pos.vx *= -phys.collision_elasticity;
                         pos.x = 0.0;
                     }
                     if pos.y + phys.h >= 160.0 {
                         pos.vy = pos.vy.abs() * -phys.collision_elasticity;
+                        pos.y = 160.0 - phys.h;
                     } else if pos.y < 0.0 {
                         pos.y = 0.0;
                         pos.vy *= -phys.collision_elasticity;
@@ -219,21 +223,21 @@ fn update() {
         for i in 0..ecs.entities.len() {
             let e = &mut ecs.entities[i];
             // trace("trying player");
-            if let Some(_) = ecs.entity_components.raining_smiley.get(e) {
-                if let Some(pos) = ecs.entity_components.kinematics.get(&e) {
-                    // trace("got comp");
-                    if pos.vy.abs() < 0.21 && pos.y > 150.0 {
-                        if let Err(_) = ecs.entity_allocator.deallocate(e) {
-                            // trace(format!["Deallocate err: {:?}", e])
-                        } else {
-                            ecs.entities.remove(i);
-                            // trace("Deallocated");
+            if let Some(s) = ecs.entity_components.raining_smiley.get_mut(e) {
+                // trace("got comp");
+                s.countdown_msec -= 1;
+                if s.countdown_msec <= 0 {
+                    if let Err(_) = ecs.entity_allocator.deallocate(e) {
+                        // trace(format!["Deallocate err: {:?}", e])
+                    } else {
+                        ecs.entities.remove(i);
+                        // trace("Deallocated");
 
-                            add_smiley_ball(ecs);
-                        }
-                        
-                    } 
-                }
+                        add_smiley_ball(ecs);
+                    }
+                    
+                }   
+                
             }
            
         }
