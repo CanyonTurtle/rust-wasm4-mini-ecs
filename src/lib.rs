@@ -10,7 +10,7 @@ use wasm4::*;
 use crate::ecs::{AllocatorEntry, IndexType};
 
 // tune-able constant: how many entities we have.
-pub const MAX_N_ENTITIES: usize = 250;
+pub const MAX_N_ENTITIES: usize = 330;
 
 
 // Example ECS component
@@ -31,7 +31,7 @@ struct PhysicsComponent {
 
 // An empty component just to tag something as being involved in a given system.
 struct RainingSmileyComponent {
-    countdown_msec: u64,
+    countdown_msec: u16,
 }
 
 // List your components in this struct. Each entity has one of each (each entry is optional).
@@ -84,7 +84,7 @@ fn update() {
                 let vy = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 5.0 - 2.5;
                 let collision_elasticity = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 0.25 + 0.6;
                 let gravity_mult = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 0.02 + 0.18;
-                let countdown_msec = 3 * 60 + ((gs.resources.rng.next() % (3 * 60)));
+                let countdown_msec = 3 * 60 + ((gs.resources.rng.next() as u16 % (3 * 60)));
 
                 if let Err(_) = gs.entity_components.kinematics.set(&gs.entities.last().unwrap(), Kinematics{x , y, vx, vy}) {
                     trace("Pos component set fail")
@@ -110,11 +110,14 @@ fn update() {
             None => {
 
                 // Initialize / allocate entities and components.
-                let mut entries = Vec::new();
-                let mut free = Vec::new();
-                let mut pos_comp_items = Vec::new();
-                let mut phys_comp_items = Vec::new();
-                let mut raining_smiley_items = Vec::new();
+                // ORDER MATTERS. Reserve memory in order from largest to smallest components, so the layout is fit optimally.
+                let mut pos_comp_items = Vec::with_capacity(MAX_N_ENTITIES);
+                let mut phys_comp_items = Vec::with_capacity(MAX_N_ENTITIES);
+                let mut raining_smiley_items = Vec::with_capacity(MAX_N_ENTITIES);
+
+                let mut entries = Vec::with_capacity(MAX_N_ENTITIES);
+                let mut free = Vec::with_capacity(MAX_N_ENTITIES);
+
                 // The ECS has a max size limit. We allocate everything upfront.
                 for i in 0..MAX_N_ENTITIES as IndexType {
                     entries.push(AllocatorEntry {

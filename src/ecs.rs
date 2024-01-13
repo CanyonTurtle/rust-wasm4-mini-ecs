@@ -1,7 +1,7 @@
 // Credit for this implementation outline to Kyren https://kyren.github.io/2018/09/14/rustconf-talk.html
 
 pub type IndexType = u16;
-pub type GenerationType = u16;
+pub type GenerationType = u32;
 
 // You can use other types that usize / u64 if these are too large
 #[derive(Eq, PartialEq)]
