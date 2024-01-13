@@ -7,10 +7,10 @@ use ecs::{Entity, GenerationalIndexAllocator, EntityMap};
 use rng::Rng;
 use wasm4::*;
 
-use crate::ecs::AllocatorEntry;
+use crate::ecs::{AllocatorEntry, IndexType};
 
 // tune-able constant: how many entities we have.
-pub const MAX_N_ENTITIES: usize = 120;
+pub const MAX_N_ENTITIES: usize = 250;
 
 
 // Example ECS component
@@ -116,7 +116,7 @@ fn update() {
                 let mut phys_comp_items = Vec::new();
                 let mut raining_smiley_items = Vec::new();
                 // The ECS has a max size limit. We allocate everything upfront.
-                for i in 0..MAX_N_ENTITIES {
+                for i in 0..MAX_N_ENTITIES as IndexType {
                     entries.push(AllocatorEntry {
                         is_live: false,
                         generation: 0,
