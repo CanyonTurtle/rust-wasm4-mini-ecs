@@ -2,6 +2,8 @@
 
 Barebones ECS for 64kb games in Rust on Wasm-4. Inspired by https://kyren.github.io/2018/09/14/rustconf-talk.html.
 
+Run latest development release here: <https://canyonturtle.github.io/rust-wasm4-mini-ecs>
+
 A game written in Rust for the [WASM-4](https://wasm4.org) fantasy console.
 
 ## Building
