@@ -1,7 +1,6 @@
-#[cfg(feature = "buddy-alloc")]
+#[cfg(feature = "linked_list_allocator")]
 mod alloc;
 
-mod alloc;
 mod wasm4;
 mod ecs;
 mod rng;
@@ -12,11 +11,10 @@ use wasm4::*;
 use crate::ecs::{AllocatorEntry, IndexType};
 
 // tune-able constant: how many entities we have.
-pub const MAX_N_ENTITIES: usize = 600;
+pub const MAX_N_ENTITIES: usize = 620;
 
 
 // Example ECS component
-#[repr(packed)]
 struct Kinematics{
     x: f32,
     y: f32,
@@ -25,7 +23,6 @@ struct Kinematics{
 }
 
 // Another example component in the ECS
-#[repr(packed)]
 struct PhysicsComponent {
     gravity_mult: f32,
     w: f32,
@@ -34,7 +31,6 @@ struct PhysicsComponent {
 }
 
 // An empty component just to tag something as being involved in a given system.
-#[repr(packed)]
 struct RainingSmileyComponent {
     countdown_msec: u16,
 }
@@ -83,11 +79,11 @@ fn update() {
         match gs.entity_allocator.allocate() {
             Ok(index) => {
                 gs.entities.push(index);
-                let x = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 120.0;
-                let y = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 50.0;
+                let x = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 140.0;
+                let y = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 1.0;
                 let vx = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 5.0 - 2.5;
-                let vy = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 5.0 - 2.5;
-                let collision_elasticity = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 0.25 + 0.6;
+                let vy = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 0.1; // 5.0 - 2.5;
+                let collision_elasticity = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 0.35 + 0.4;
                 let gravity_mult = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * 0.02 + 0.18;
                 let countdown_msec = 3 * 60 + ((gs.resources.rng.next() as u16 % (3 * 60)));
 
@@ -113,7 +109,10 @@ fn update() {
     unsafe {
         match STATIC_ECS_DATA {
             None => {
+
+                #[cfg(feature = "linked_list_allocator")]
                 alloc::init_heap();
+
                 // Initialize / allocate entities and components.
                 // ORDER MATTERS. Reserve memory in order from largest to smallest components, so the layout is fit optimally.
                 let mut pos_comp_items = Vec::with_capacity(MAX_N_ENTITIES);
@@ -273,5 +272,5 @@ fn update() {
     draw_entities_system(&ecs);
 
     unsafe { *DRAW_COLORS = 0x0001 }
-    text("I love you Zoe <3", 10, 150);
+    text("rust-wasm4-mini-ecs", 3, 150);
 }
