@@ -1,5 +1,7 @@
 #[cfg(feature = "buddy-alloc")]
 mod alloc;
+
+mod alloc;
 mod wasm4;
 mod ecs;
 mod rng;
@@ -10,10 +12,11 @@ use wasm4::*;
 use crate::ecs::{AllocatorEntry, IndexType};
 
 // tune-able constant: how many entities we have.
-pub const MAX_N_ENTITIES: usize = 330;
+pub const MAX_N_ENTITIES: usize = 600;
 
 
 // Example ECS component
+#[repr(packed)]
 struct Kinematics{
     x: f32,
     y: f32,
@@ -22,6 +25,7 @@ struct Kinematics{
 }
 
 // Another example component in the ECS
+#[repr(packed)]
 struct PhysicsComponent {
     gravity_mult: f32,
     w: f32,
@@ -30,6 +34,7 @@ struct PhysicsComponent {
 }
 
 // An empty component just to tag something as being involved in a given system.
+#[repr(packed)]
 struct RainingSmileyComponent {
     countdown_msec: u16,
 }
@@ -43,7 +48,7 @@ struct EntityComponents {
 
 // All other state that doesn't fit into a component goes here.
 struct GameResources {
-    hello_msg: String,
+    // hello_msg: String,
     rng: Rng,
 }
 
@@ -108,12 +113,14 @@ fn update() {
     unsafe {
         match STATIC_ECS_DATA {
             None => {
-
+                alloc::init_heap();
                 // Initialize / allocate entities and components.
                 // ORDER MATTERS. Reserve memory in order from largest to smallest components, so the layout is fit optimally.
                 let mut pos_comp_items = Vec::with_capacity(MAX_N_ENTITIES);
                 let mut phys_comp_items = Vec::with_capacity(MAX_N_ENTITIES);
                 let mut raining_smiley_items = Vec::with_capacity(MAX_N_ENTITIES);
+
+                let entities = Vec::with_capacity(MAX_N_ENTITIES);
 
                 let mut entries = Vec::with_capacity(MAX_N_ENTITIES);
                 let mut free = Vec::with_capacity(MAX_N_ENTITIES);
@@ -142,9 +149,9 @@ fn update() {
                         physics: EntityMap{0: phys_comp_items},
                         raining_smiley: EntityMap{0: raining_smiley_items},
                     },
-                    entities: Vec::new(),
+                    entities,
                     resources: GameResources{
-                        hello_msg: "Hello from Rust!".to_string(),
+                        // hello_msg: "Hello from Rust!".to_string(),
                         rng: Rng::new()
                     }
                 });
@@ -250,14 +257,13 @@ fn update() {
 
     unsafe { *DRAW_COLORS = 2 }
 
-    text(&ecs.resources.hello_msg, 10, 10);
+    // text(&ecs.resources.hello_msg, 10, 10);
 
     let gamepad = unsafe { *GAMEPAD1 };
     if gamepad & BUTTON_1 != 0 {
         unsafe { *DRAW_COLORS = 4 }
     }
     
-    text("Press X to blink", 16, 90);
 
     // Running the game is just playing forward all the systems!!
     update_physics_system(&mut ecs);
@@ -265,4 +271,7 @@ fn update() {
     rain_smiley_system(&mut ecs);
 
     draw_entities_system(&ecs);
+
+    unsafe { *DRAW_COLORS = 0x0001 }
+    text("I love you Zoe <3", 10, 150);
 }
