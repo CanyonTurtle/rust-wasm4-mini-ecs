@@ -16,6 +16,8 @@ pub const MAX_N_ENTITIES: usize = 30;
 pub const BALL_WIDTH: f32 = 8.0;
 pub const BALL_HEIGHT: f32 = 8.0;
 
+pub const MOTION_DECAY: f32 = 1.5e-2;
+
 // Example ECS component
 struct Kinematics{
     x: f32,
@@ -87,10 +89,10 @@ fn update() {
         match gs.entity_allocator.allocate() {
             Ok(index) => {
                 const SPEED_VARIATION: f32 = 2.0;
-                const POS_VARIATION: f32 = 2.0;
+                const POS_VARIATION: f32 = 60.0;
                 const ELASTICITY_VARIATION: f32 = 0.0;
-                let x = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * POS_VARIATION + 10.0;
-                let y = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * POS_VARIATION + 10.0;
+                let x = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * POS_VARIATION + 79.0;
+                let y = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * POS_VARIATION + 79.0;
                 let vx = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * SPEED_VARIATION;
                 let vy = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * SPEED_VARIATION; // 5.0 - 2.5;
                 let collision_elasticity = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * ELASTICITY_VARIATION + 1.0;
@@ -209,6 +211,7 @@ fn update() {
             if let Some(pos) = ecs.components.kinematics.get_mut(&e, &ecs.entity_allocator) {
                 pos.x += pos.vx;
                 pos.y += pos.vy;
+
             }
         }
     }
@@ -239,6 +242,11 @@ fn update() {
 
                     match k2p {
                         Some(k2p) => {
+
+                            // Linked balls slow down over time
+                            pos.vx *= 1.0 - MOTION_DECAY;
+                            pos.vy *= 1.0 - MOTION_DECAY;
+
                             // if it's a linked ball, apply a tension force to its link.
                             let del_x = k2p.0 - pos.x;
                             let del_y = k2p.1 - pos.y;
@@ -257,6 +265,7 @@ fn update() {
                         }
                         // if it's an unlinked ball, let it bounce on the edges
                         None => {
+                            
                             if pos.x + BALL_WIDTH >= 160.0 {
                                 pos.vx *= -phys.collision_elasticity;
                                 pos.x = 160.0 - BALL_WIDTH;
@@ -293,6 +302,7 @@ fn update() {
 
     /// Example mutable system: If balls are touching, link them if both have no other link.
     fn link_smileys_system(ecs: &mut ECS) {
+        const BALL_LINK_RADIUS: f32 = 10.0;
         let mut links = vec![];
         let mut linked_entities_this_pass = vec![];
         for i in 0..ecs.entities.len() {
@@ -303,7 +313,7 @@ fn update() {
                     if let Some(rs2) = ecs.components.raining_smiley.get(e2, &ecs.entity_allocator) {
                         if let Some(k1) = ecs.components.kinematics.get(e1, &ecs.entity_allocator) {
                             if let Some(k2) = ecs.components.kinematics.get(e2, &ecs.entity_allocator) {
-                                if (k1.x - k2.x).powi(2) + (k1.y - k2.y).powi(2) < (8.0f32).powi(2) {
+                                if (k1.x - k2.x).powi(2) + (k1.y - k2.y).powi(2) < (BALL_LINK_RADIUS).powi(2) {
                                     if let BallLink::ReadyToLink = rs1.link {
                                         if let BallLink::ReadyToLink = rs2.link {
                                             if !linked_entities_this_pass.contains(e1) && !linked_entities_this_pass.contains(e2) {
@@ -345,17 +355,19 @@ fn update() {
     // Example input mutable system: this stores game input for other systems to use later (via the resources struct in the ecs struct).
     fn update_input_system(ecs: &mut ECS) {
         unsafe {
+            let mut vx = 0.0;
+            let mut vy = 0.0;
             if *GAMEPAD1 & BUTTON_LEFT != 0 {
-                ecs.resources.current_wind = (-1.0, 0.0);
+                vx -= 1.0;
             } else if *GAMEPAD1 & BUTTON_RIGHT != 0 {
-                ecs.resources.current_wind = (1.0, 0.0);
-            } else if *GAMEPAD1 & BUTTON_UP != 0 {
-                ecs.resources.current_wind = (0.0, -1.0);
-            } else if *GAMEPAD1 & BUTTON_DOWN != 0 {
-                ecs.resources.current_wind = (0.0, 1.0);
-            } else {
-                ecs.resources.current_wind = (0.0, 0.0);
+                vx += 1.0;
             }
+            if *GAMEPAD1 & BUTTON_UP != 0 {
+                vy -= 1.0;
+            } else if *GAMEPAD1 & BUTTON_DOWN != 0 {
+                vy += 1.0;
+            }
+            ecs.resources.current_wind = (vx, vy);
         }
     }
 
