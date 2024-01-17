@@ -3,25 +3,48 @@
 pub type IndexType = u16;
 pub type GenerationType = u32;
 
-// You can use other types that usize / u64 if these are too large
+/// Represent an index that always points to a small number in a vector, but also has a generation that allows it to expire. 
+/// You can change this struct's internal size types if these are too large.
 #[derive(Eq, PartialEq, Clone, Copy)]
 pub struct GenerationalIndex {
     index: IndexType,
     generation: GenerationType,
 }
 
+/// Represent available spots in the generational allocator. This stays public even though it's really for internal use, so that the allocation for these happens upfront explicitly (see demo usage).
 pub struct AllocatorEntry {
-    pub is_live: bool,
-    pub generation: GenerationType,
+    is_live: bool,
+    generation: GenerationType,
 }
 
+impl AllocatorEntry {
+    pub fn new()-> AllocatorEntry {
+        AllocatorEntry {
+            is_live: false,
+            generation: 0,
+        }
+    }
+}
+
+/// Represent which indecies are currently in use by which generation, and handle allocation and deallocation of these indecies.
+/// This does NOT allocate the actual data stored in the entity component system, JUST the indecies.
+/// This is on purpose; it allows manual management of the component memory by the user.
 pub struct GenerationalIndexAllocator {
-    pub entries: Vec<AllocatorEntry>,
-    pub free: Vec<IndexType>,
-    pub generation_counter: GenerationType,
+    entries: Vec<AllocatorEntry>,
+    free: Vec<IndexType>,
+    generation_counter: GenerationType,
 }
 
-pub struct AllocationFailed(());
+impl GenerationalIndexAllocator {
+    pub fn new(entries: Vec<AllocatorEntry>, free: Vec<IndexType>) -> GenerationalIndexAllocator {
+        GenerationalIndexAllocator {
+            entries,
+            free,
+            generation_counter: 0,
+        }
+    }
+}
+pub struct AllocatorOutOfMemory(());
 
 #[derive(Debug)]
 pub enum DeallocationError {
@@ -30,11 +53,12 @@ pub enum DeallocationError {
     AlreadyDeallocated
 }
 
-// pub struct LiveLookupOOB(());
+pub struct LiveLookupOOB(());
 
 impl GenerationalIndexAllocator {
 
-    pub fn allocate(&mut self) -> Result<GenerationalIndex, AllocationFailed> {
+    /// Reserve some index and return it as a handle to be used with GenerationalIndexArrays (and to be deallocated later).
+    pub fn allocate(&mut self) -> Result<GenerationalIndex, AllocatorOutOfMemory> {
         // try to find a free spot.
 
         match self.free.pop() {
@@ -47,13 +71,13 @@ impl GenerationalIndexAllocator {
                     generation: self.generation_counter
                 }) 
             },
-            None => Err(AllocationFailed(())),
+            None => Err(AllocatorOutOfMemory(())),
         }
     }
 
 
 
-    // Return index back to pool of available ones. This does NOT deallocate the resource itself
+    /// Return index back to pool of available ones. This does NOT deallocate the resource itself.
     pub fn deallocate(&mut self, index: &GenerationalIndex) -> Result<(), DeallocationError> {
         let i = index.index;
         if i >= self.entries.len() as IndexType {
@@ -69,15 +93,19 @@ impl GenerationalIndexAllocator {
         }
     }
     
-    // pub fn is_live(&self, index: GenerationalIndex) -> Result<bool, LiveLookupOOB> {
-    //     if index.index >= self.entries.len() {
-    //         Err(LiveLookupOOB(()))
-    //     } else {
-    //         Ok(self.entries[index.index].is_live)
-    //     }
-    // }
+    /// Check whether this index is live (i.e. if it was deallocated, the index still exists, but it's not "live").
+    pub fn is_live(&self, index: &GenerationalIndex) -> Result<bool, LiveLookupOOB> {
+        if index.index >= self.entries.len() as IndexType {
+            Err(LiveLookupOOB(()))
+        } else {
+            Ok(self.entries[index.index as usize].is_live)
+        }
+    }
 }
 
+/// Represent a value being stored inside an array indexed by generational indecies.
+/// Keeps its own generation, and then when it's accessed later, the generations must match.
+/// (This is the whole point of this ECS - this allows low, reusable index values, but also allows indecies to stale via the generation. It's basically a high-resource-efficiency HashMap.
 pub struct ArrayEntry<T> {
     pub value: T,
     pub generation: GenerationType,
@@ -90,7 +118,6 @@ pub struct IndexOOB(());
 
 impl<T> GenerationalIndexArray<T> {
     // Set the value for some generational index.  May overwrite past generation
-    // values.
     pub fn set(&mut self, index: &GenerationalIndex, value: T) -> Result<(), IndexOOB> {
         if index.index >= self.0.len() as IndexType {
             Err(IndexOOB(()))
@@ -100,40 +127,52 @@ impl<T> GenerationalIndexArray<T> {
         }
     }
 
-    // Gets the value for some generational index, the generation must match.
-    pub fn get(&self, index: &GenerationalIndex) -> Option<&T> {
+    /// Gets the value for some generational index, the generation must match AND this index must be live in the passed-in allocator.
+    pub fn get(&self, index: &GenerationalIndex, allocator: &GenerationalIndexAllocator) -> Option<&T> {
         if index.index >= self.0.len() as IndexType {
             None
         } else {
-            match &self.0[index.index as usize] {
-                Some(ae) => {
-                    if index.generation != ae.generation {
-                        None
-                    } else {
-                        Some(&ae.value)
-                    }
-                },
-                None => None,
+            match allocator.is_live(&index) {
+                Ok(alive) => match alive {
+                    true => match &self.0[index.index as usize] {
+                        Some(ae) => {
+                            if index.generation != ae.generation {
+                                None
+                            } else {
+                                Some(&ae.value)
+                            }
+                        },
+                        None => None,
+                    },
+                    false => None
+                }
+                Err(_) => None,
             }
-        }
+        }   
     }
 
-    // Get the value of some generational index. The generation must match.
-    pub fn get_mut(&mut self, index: &GenerationalIndex) -> Option<&mut T> {
+    /// Mutably gets the value for some generational index, the generation must match AND this index must be live in the passed-in allocator.
+    pub fn get_mut(&mut self, index: &GenerationalIndex, allocator: &GenerationalIndexAllocator) -> Option<&mut T> {
         if index.index >= self.0.len() as IndexType {
             None
         } else {
-            match &mut self.0[index.index as usize] {
-                Some(ae) => {
-                    if index.generation != ae.generation {
-                        None
-                    } else {
-                        Some(&mut ae.value)
-                    }
-                },
-                None => None,
+            match allocator.is_live(&index) {
+                Ok(alive) => match alive {
+                    true => match &mut self.0[index.index as usize] {
+                        Some(ae) => {
+                            if index.generation != ae.generation {
+                                None
+                            } else {
+                                Some(&mut ae.value)
+                            }
+                        },
+                        None => None,
+                    },
+                    false => None
+                }
+                Err(_) => None,
             }
-        }
+        }   
     }
 }
 
