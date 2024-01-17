@@ -4,7 +4,7 @@ pub type IndexType = u16;
 pub type GenerationType = u32;
 
 // You can use other types that usize / u64 if these are too large
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Clone, Copy)]
 pub struct GenerationalIndex {
     index: IndexType,
     generation: GenerationType,
