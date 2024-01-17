@@ -1,4 +1,3 @@
-#[cfg(feature = "linked_list_allocator")]
 mod alloc;
 
 mod wasm4;
@@ -11,7 +10,7 @@ use wasm4::*;
 use crate::ecs::{AllocatorEntry, IndexType};
 
 // tune-able constant: how many entities we have.
-pub const MAX_N_ENTITIES: usize = 30;
+pub const MAX_N_ENTITIES: usize = 20;
 
 pub const BALL_WIDTH: f32 = 8.0;
 pub const BALL_HEIGHT: f32 = 8.0;
@@ -57,7 +56,11 @@ struct GameResources {
     current_wind: (f32, f32),
 }
 
-// Here's the global state of the game, in our ECS object!
+/// Here's the global state of the game, in our ECS object!
+/// (Note: if you have, say, 2 or 3 different types of entities that are
+/// all very distinct from eachother (and thusly have different sets of common components)
+/// you may want to create multiple ECS structs, so you don't have to have a bunch of 
+/// optional components that are just None all the time, eating up space in the heap.)
 struct ECS {
     entity_allocator: GenerationalIndexAllocator,
     components: EntityComponents,
@@ -116,13 +119,13 @@ fn update() {
         }
     }
 
-    // trace("begin");
+    // Each update frame, load in a reference to the static ECS data.
+    // The very first update will have to initialize this.
     let mut ecs: &mut ECS;
     unsafe {
         match STATIC_ECS_DATA {
             None => {
 
-                #[cfg(feature = "linked_list_allocator")]
                 alloc::init_heap();
 
                 // Initialize / allocate entities and components.
@@ -162,7 +165,7 @@ fn update() {
                     }
                 });
 
-                // Example usage on startup: allocate an entity and give it a position.
+                // Example usage on startup: allocate entities.
                 // #[allow(static_mut_ref)]
                 if let Some(gs) = &mut STATIC_ECS_DATA {
                     for _ in 0..MAX_N_ENTITIES {
@@ -343,8 +346,6 @@ fn update() {
     }
 
     unsafe { *DRAW_COLORS = 2 }
-
-    // text(&ecs.resources.hello_msg, 10, 10);
 
     let gamepad = unsafe { *GAMEPAD1 };
     ecs.resources.gravity_overall_mult = match gamepad != 0 {
