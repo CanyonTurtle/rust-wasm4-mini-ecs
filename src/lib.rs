@@ -16,7 +16,9 @@ pub const MAX_N_ENTITIES: usize = 600;
 pub const BALL_WIDTH: f32 = 8.0;
 pub const BALL_HEIGHT: f32 = 8.0;
 
-pub const MOTION_DECAY: f32 = 1.5e-2;
+pub const MOTION_DECAY: f32 = 7.0e-2;
+
+const AVG_SPRING_LENGTH: f32 = 15.0;
 
 // Example ECS component
 struct Kinematics{
@@ -39,6 +41,7 @@ enum BallLink {
 // Another example component. Each ball can have a link to another ball (or be ready to link).
 struct SmileyBallComponent {
     link: BallLink,
+    spring_length: f32,
     // countdown_msec: u32,
 }
 
@@ -95,14 +98,29 @@ fn update() {
         }
         match gs.entity_allocator.allocate() {
             Ok(index) => {
+                let px;
+                let py;
+                unsafe {
+                    if *MOUSE_BUTTONS != 0 {
+                        px = *MOUSE_X;
+                        py = *MOUSE_Y;
+                    } else {
+                        px = 79;
+                        py = 30;
+                    }
+
+                }
+
                 const SPEED_VARIATION: f32 = 2.0;
-                const POS_VARIATION: f32 = 60.0;
+                const POS_VARIATION: f32 = 20.0;
                 const ELASTICITY_VARIATION: f32 = 0.0;
-                let x = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * POS_VARIATION + 79.0;
-                let y = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * POS_VARIATION + 79.0;
+                const SPRING_LEGNTH_VARIATION: f32 = 10.0;
+                let x = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * POS_VARIATION + px as f32;
+                let y = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * POS_VARIATION + py as f32;
                 let vx = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * SPEED_VARIATION;
                 let vy = ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * SPEED_VARIATION; // 5.0 - 2.5;
                 let collision_elasticity = ((gs.resources.rng.next() % 1000) as f32 / 1000.0) * ELASTICITY_VARIATION + 1.0;
+                let spring_length = AVG_SPRING_LENGTH + ((gs.resources.rng.next() % 1000) as f32 / 1000.0 - 0.5) * SPRING_LEGNTH_VARIATION;
 
                 // We push this generational index in, then we can reliably set the components (gs.entities will have something in it)
                 gs.entities.push(index);
@@ -113,7 +131,7 @@ fn update() {
                 if let Err(_) = gs.components.physics.set(&gs.entities.last().unwrap(), &gs.entity_allocator, PhysicsComponent{collision_elasticity}) {
                     trace("Phys component set fail")
                 }
-                if let Err(_) = gs.components.raining_smiley.set(&gs.entities.last().unwrap(), &gs.entity_allocator, SmileyBallComponent{link: BallLink::ReadyToLink}) {
+                if let Err(_) = gs.components.raining_smiley.set(&gs.entities.last().unwrap(), &gs.entity_allocator, SmileyBallComponent{link: BallLink::ReadyToLink, spring_length}) {
                     trace("Phys component set fail")
                 }
             },
@@ -149,7 +167,7 @@ fn update() {
                     free.push(i);
                     pos_comp_items.push(Kinematics{x: 0.0, y: 0.0, vx: 0.0, vy: 0.0});
                     phys_comp_items.push(PhysicsComponent{collision_elasticity: 1.0});
-                    raining_smiley_items.push(SmileyBallComponent{link: BallLink::ReadyToLink});
+                    raining_smiley_items.push(SmileyBallComponent{link: BallLink::ReadyToLink, spring_length: 0.0});
                 }
 
                 // Initialization for the ECS happens here.
@@ -164,7 +182,7 @@ fn update() {
                     resources: GameResources{
                         // hello_msg: "Hello from Rust!".to_string(),
                         rng: Rng::new(),
-                        gravity_overall_mult: 0.015,
+                        gravity_overall_mult: 2.0,
                         current_wind: (0.0, 0.0)
                     }
                 });
@@ -233,7 +251,9 @@ fn update() {
             if let Ok(sm) = ecs.components.raining_smiley.get(&e, &ecs.entity_allocator) {
                 if let BallLink::CurrentlyLinked(o) = sm.link {
                     if let Ok(k2) = ecs.components.kinematics.get(&o, &ecs.entity_allocator) {
-                        k2p = Some((k2.x, k2.y, o));
+                        if let Ok(sm2) = ecs.components.raining_smiley.get(&o, &ecs.entity_allocator) {
+                            k2p = Some((k2.x, k2.y, sm.spring_length, sm2.spring_length, o,));
+                        }
                     }
                 }
             }
@@ -247,8 +267,13 @@ fn update() {
                     pos.vx += ecs.resources.current_wind.0 * WIND_SCALER;
                     pos.vy += ecs.resources.current_wind.1 * WIND_SCALER;
 
+                    pos.vy += ecs.resources.gravity_overall_mult;
+
+
                     match k2p {
                         Some(k2p) => {
+                            
+
 
                             // Linked balls slow down over time
                             pos.vx *= 1.0 - MOTION_DECAY;
@@ -256,23 +281,27 @@ fn update() {
 
                             // if it's a linked ball, apply a tension force to its link.
                             let del_x = k2p.0 - pos.x;
-                            let del_y = k2p.1 - pos.y;
+                            let del_y = k2p.1 - pos.y; 
+
+                            let mag = ((del_x.powi(2) + del_y.powi(2)).sqrt() - (k2p.2 + k2p.3) / 2.0) * 0.01;
+
                             let denom = (del_x.powi(2) + del_y.powi(2)).sqrt();
                             if denom > 0.0 {
-                                pos.vy += del_y / denom * ecs.resources.gravity_overall_mult;
-                                pos.vx += del_x / denom * ecs.resources.gravity_overall_mult;
+                                pos.vy += del_y * mag / denom * ecs.resources.gravity_overall_mult;
+                                pos.vx += del_x * mag / denom * ecs.resources.gravity_overall_mult;
                             }
 
                             // if it's a linked ball, remove it when it hits the screen bounds.
                             if pos.x < 0.0 || pos.x + BALL_WIDTH >= 160.0 || pos.y < 0.0 || pos.y + BALL_HEIGHT >= 160.0 {
                                 if let Ok(()) = ecs.entity_allocator.deallocate(&e) {
-                                    to_rm.push((i, k2p.2));
+                                    to_rm.push((i, k2p.4));
                                 }
                             }
                         }
                         // if it's an unlinked ball, let it bounce on the edges
                         None => {
                             
+
                             if pos.x + BALL_WIDTH >= 160.0 {
                                 pos.vx *= -phys.collision_elasticity;
                                 pos.x = 160.0 - BALL_WIDTH;
@@ -354,7 +383,7 @@ fn update() {
     let gamepad = unsafe { *GAMEPAD1 };
     ecs.resources.gravity_overall_mult = match gamepad != 0 {
         true => 0.1,
-        false => 0.015
+        false => 0.03
     };
     
     // Example input mutable system: this stores game input for other systems to use later (via the resources struct in the ecs struct).
