@@ -10,7 +10,8 @@ use wasm4::*;
 use crate::ecs::{AllocatorEntry, IndexType};
 
 // tune-able constant: how many entities we have.
-pub const MAX_N_ENTITIES: usize = 20;
+pub const INITIAL_N_ENTITIES: usize = 50;
+pub const MAX_N_ENTITIES: usize = 600;
 
 pub const BALL_WIDTH: f32 = 8.0;
 pub const BALL_HEIGHT: f32 = 8.0;
@@ -89,6 +90,9 @@ fn update() {
     /// Adds a ball to the ECS. This isn't a "system" per-se, this is just a function that adds a ball entity.
     /// (this is analogous to a "Command" in Bevy in that it adds an entity.)
     fn add_smiley_ball(gs: &mut ECS) {
+        if gs.entities.len() >= MAX_N_ENTITIES {
+            return
+        }
         match gs.entity_allocator.allocate() {
             Ok(index) => {
                 const SPEED_VARIATION: f32 = 2.0;
@@ -102,14 +106,14 @@ fn update() {
 
                 // We push this generational index in, then we can reliably set the components (gs.entities will have something in it)
                 gs.entities.push(index);
-                if let Err(_) = gs.components.kinematics.set(&gs.entities.last().unwrap(), Kinematics{x , y, vx, vy}) {
+                if let Err(_) = gs.components.kinematics.set(&gs.entities.last().unwrap(), &gs.entity_allocator, Kinematics{x , y, vx, vy}) {
                     trace("Pos component set fail")
 
                 }
-                if let Err(_) = gs.components.physics.set(&gs.entities.last().unwrap(), PhysicsComponent{collision_elasticity}) {
+                if let Err(_) = gs.components.physics.set(&gs.entities.last().unwrap(), &gs.entity_allocator, PhysicsComponent{collision_elasticity}) {
                     trace("Phys component set fail")
                 }
-                if let Err(_) = gs.components.raining_smiley.set(&gs.entities.last().unwrap(), SmileyBallComponent{link: BallLink::ReadyToLink}) {
+                if let Err(_) = gs.components.raining_smiley.set(&gs.entities.last().unwrap(), &gs.entity_allocator, SmileyBallComponent{link: BallLink::ReadyToLink}) {
                     trace("Phys component set fail")
                 }
             },
@@ -143,9 +147,9 @@ fn update() {
                 for i in 0..MAX_N_ENTITIES as IndexType {
                     entries.push(AllocatorEntry::new());
                     free.push(i);
-                    pos_comp_items.push(None);
-                    phys_comp_items.push(None);
-                    raining_smiley_items.push(None);
+                    pos_comp_items.push(Kinematics{x: 0.0, y: 0.0, vx: 0.0, vy: 0.0});
+                    phys_comp_items.push(PhysicsComponent{collision_elasticity: 1.0});
+                    raining_smiley_items.push(SmileyBallComponent{link: BallLink::ReadyToLink});
                 }
 
                 // Initialization for the ECS happens here.
@@ -168,7 +172,7 @@ fn update() {
                 // Example usage on startup: allocate entities.
                 // #[allow(static_mut_ref)]
                 if let Some(gs) = &mut STATIC_ECS_DATA {
-                    for _ in 0..MAX_N_ENTITIES {
+                    for _ in 0..INITIAL_N_ENTITIES {
                         add_smiley_ball(gs);
                     }
                 }
@@ -193,11 +197,11 @@ fn update() {
     /// Example immutable-reference system: take in the ECS and compute something from it (e.g. rendering)
     fn draw_smileys_system(ecs: &ECS) {
         for player in &ecs.entities {
-            if let Some(p1) = ecs.components.kinematics.get(&player, &ecs.entity_allocator) {
-                if let Some(sm) = ecs.components.raining_smiley.get(&player, &ecs.entity_allocator) {
+            if let Ok(p1) = ecs.components.kinematics.get(&player, &ecs.entity_allocator) {
+                if let Ok(sm) = ecs.components.raining_smiley.get(&player, &ecs.entity_allocator) {
                     unsafe { *DRAW_COLORS = 0x0002 }
                     if let BallLink::CurrentlyLinked(id2) = sm.link {
-                        if let Some(p2) = ecs.components.kinematics.get(&id2, &ecs.entity_allocator) {
+                        if let Ok(p2) = ecs.components.kinematics.get(&id2, &ecs.entity_allocator) {
                             unsafe { *DRAW_COLORS = 0x0003 }
                             line(p1.x as i32 + 4, p1.y as i32 + 4, p2.x as i32 + 4, p2.y as i32 + 4);
                         } 
@@ -211,7 +215,7 @@ fn update() {
     /// Example mutable-reference system: move all entities that have kinematics.
     fn update_kinematics_system(ecs: &mut ECS) {
         for e in &mut ecs.entities {
-            if let Some(pos) = ecs.components.kinematics.get_mut(&e, &ecs.entity_allocator) {
+            if let Ok(pos) = ecs.components.kinematics.get_mut(&e, &ecs.entity_allocator) {
                 pos.x += pos.vx;
                 pos.y += pos.vy;
 
@@ -226,17 +230,17 @@ fn update() {
             let mut k2p = None;
 
             // Check if there's an active linked ball (get its position if so).
-            if let Some(sm) = ecs.components.raining_smiley.get(&e, &ecs.entity_allocator) {
+            if let Ok(sm) = ecs.components.raining_smiley.get(&e, &ecs.entity_allocator) {
                 if let BallLink::CurrentlyLinked(o) = sm.link {
-                    if let Some(k2) = ecs.components.kinematics.get(&o, &ecs.entity_allocator) {
+                    if let Ok(k2) = ecs.components.kinematics.get(&o, &ecs.entity_allocator) {
                         k2p = Some((k2.x, k2.y, o));
                     }
                 }
             }
             
             // Update the kinematics of this ball.
-            if let Some(pos) = ecs.components.kinematics.get_mut(&e, &ecs.entity_allocator) {
-                if let Some(phys) = ecs.components.physics.get(&e, &ecs.entity_allocator) {
+            if let Ok(pos) = ecs.components.kinematics.get_mut(&e, &ecs.entity_allocator) {
+                if let Ok(phys) = ecs.components.physics.get(&e, &ecs.entity_allocator) {
 
                     // apply wind
                     const WIND_SCALER: f32 = 0.03;
@@ -296,7 +300,7 @@ fn update() {
         // Also, make sure the other ball that was paired changes state to "ready to link".
         for (i, other_ball) in to_rm.into_iter().rev() {
             ecs.entities.remove(i);
-            if let Some(sm) = ecs.components.raining_smiley.get_mut(&other_ball, &ecs.entity_allocator) {
+            if let Ok(sm) = ecs.components.raining_smiley.get_mut(&other_ball, &ecs.entity_allocator) {
                 sm.link = BallLink::ReadyToLink;
             }
             add_smiley_ball(ecs);
@@ -312,10 +316,10 @@ fn update() {
             let e1 = &ecs.entities[i];
             for j in (i+1)..ecs.entities.len() {
                 let e2 = &ecs.entities[j];
-                if let Some(rs1) = ecs.components.raining_smiley.get(e1, &ecs.entity_allocator) {
-                    if let Some(rs2) = ecs.components.raining_smiley.get(e2, &ecs.entity_allocator) {
-                        if let Some(k1) = ecs.components.kinematics.get(e1, &ecs.entity_allocator) {
-                            if let Some(k2) = ecs.components.kinematics.get(e2, &ecs.entity_allocator) {
+                if let Ok(rs1) = ecs.components.raining_smiley.get(e1, &ecs.entity_allocator) {
+                    if let Ok(rs2) = ecs.components.raining_smiley.get(e2, &ecs.entity_allocator) {
+                        if let Ok(k1) = ecs.components.kinematics.get(e1, &ecs.entity_allocator) {
+                            if let Ok(k2) = ecs.components.kinematics.get(e2, &ecs.entity_allocator) {
                                 if (k1.x - k2.x).powi(2) + (k1.y - k2.y).powi(2) < (BALL_LINK_RADIUS).powi(2) {
                                     if let BallLink::ReadyToLink = rs1.link {
                                         if let BallLink::ReadyToLink = rs2.link {
@@ -335,10 +339,10 @@ fn update() {
         }
 
         for (e1, e2) in links {
-            if let Some(rsm1) = ecs.components.raining_smiley.get_mut(e1, &ecs.entity_allocator) {
+            if let Ok(rsm1) = ecs.components.raining_smiley.get_mut(e1, &ecs.entity_allocator) {
                 rsm1.link = BallLink::CurrentlyLinked(*e2);
             }
-            if let Some(rsm2) = ecs.components.raining_smiley.get_mut(e2, &ecs.entity_allocator) {
+            if let Ok(rsm2) = ecs.components.raining_smiley.get_mut(e2, &ecs.entity_allocator) {
                 rsm2.link = BallLink::CurrentlyLinked(*e1);
             }
         }
@@ -372,6 +376,21 @@ fn update() {
         }
     }
 
+    fn add_balls_if_all_linked(ecs: &mut ECS) {
+        let mut unlinked_count = 0;
+        for e in &ecs.entities {
+            if let Ok(b) = ecs.components.raining_smiley.get(e, &ecs.entity_allocator) {
+                if let BallLink::ReadyToLink = b.link {
+                    unlinked_count += 1;
+                }
+            }
+        }
+        if unlinked_count == 0 {
+            add_smiley_ball(ecs);
+            add_smiley_ball(ecs);
+        }
+    }
+
 
     // Running the game is just playing forward all the systems!!
 
@@ -380,6 +399,8 @@ fn update() {
     update_smileys_system(&mut ecs);
     update_kinematics_system(&mut ecs);
     link_smileys_system(&mut ecs);
+    add_balls_if_all_linked(&mut ecs);
+
 
     // immutable systems
     draw_smileys_system(&ecs);

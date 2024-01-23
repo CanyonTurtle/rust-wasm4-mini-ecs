@@ -53,7 +53,12 @@ pub enum DeallocationError {
     AlreadyDeallocated
 }
 
-pub struct LiveLookupOOB(());
+#[derive(Debug)]
+pub enum GenerationalIndexError {
+    IndexOOB,
+    GenerationMismatch,
+    NotLive
+}
 
 impl GenerationalIndexAllocator {
 
@@ -94,83 +99,82 @@ impl GenerationalIndexAllocator {
     }
     
     /// Check whether this index is live (i.e. if it was deallocated, the index still exists, but it's not "live").
-    pub fn is_live(&self, index: &GenerationalIndex) -> Result<bool, LiveLookupOOB> {
+    pub fn is_live(&self, index: &GenerationalIndex) -> Result<bool, GenerationalIndexError> {
         if index.index >= self.entries.len() as IndexType {
-            Err(LiveLookupOOB(()))
+            Err(GenerationalIndexError::IndexOOB)
         } else {
             Ok(self.entries[index.index as usize].is_live)
         }
     }
 }
 
-/// Represent a value being stored inside an array indexed by generational indecies.
-/// Keeps its own generation, and then when it's accessed later, the generations must match.
-/// (This is the whole point of this ECS - this allows low, reusable index values, but also allows indecies to stale via the generation. It's basically a high-resource-efficiency HashMap.
-pub struct ArrayEntry<T> {
-    pub value: T,
-    pub generation: GenerationType,
-}
-
-// An associative array from GenerationalIndex to some Value T.
-pub struct GenerationalIndexArray<T>(pub Vec<Option<ArrayEntry<T>>>);
-
-pub struct IndexOOB(());
+// An associative array from GenerationalIndex to some Value T. Since get, set, and get_mut require the allocator to be passed in,
+// the datatype doesn't require anything to be stored in these arrays themselves.
+pub struct GenerationalIndexArray<T>(pub Vec<T>);
 
 impl<T> GenerationalIndexArray<T> {
-    // Set the value for some generational index.  May overwrite past generation
-    pub fn set(&mut self, index: &GenerationalIndex, value: T) -> Result<(), IndexOOB> {
+    // Set the value for some generational index, the generation must match AND this index must be live in the passed-in allocator.
+    pub fn set(&mut self, index: &GenerationalIndex, allocator: &GenerationalIndexAllocator, value: T) -> Result<(), GenerationalIndexError> {
         if index.index >= self.0.len() as IndexType {
-            Err(IndexOOB(()))
+            Err(GenerationalIndexError::IndexOOB)
         } else {
-            self.0[index.index as usize] = Some(ArrayEntry{value, generation: index.generation});
-            Ok(())
+            match allocator.is_live(&index) {
+                Ok(alive) => match alive {
+                    true => {
+                        if index.generation != allocator.entries[index.index as usize].generation {
+                            Err(GenerationalIndexError::GenerationMismatch)
+                        } else {
+                            self.0[index.index as usize] = value;
+                            Ok(())
+                        }
+                    },
+                    false => Err(GenerationalIndexError::NotLive)
+                }
+                Err(e) => Err(e),
+            }
         }
     }
 
     /// Gets the value for some generational index, the generation must match AND this index must be live in the passed-in allocator.
-    pub fn get(&self, index: &GenerationalIndex, allocator: &GenerationalIndexAllocator) -> Option<&T> {
+    pub fn get(&self, index: &GenerationalIndex, allocator: &GenerationalIndexAllocator) -> Result<&T, GenerationalIndexError> {
         if index.index >= self.0.len() as IndexType {
-            None
+            Err(GenerationalIndexError::IndexOOB)
         } else {
             match allocator.is_live(&index) {
                 Ok(alive) => match alive {
-                    true => match &self.0[index.index as usize] {
-                        Some(ae) => {
-                            if index.generation != ae.generation {
-                                None
-                            } else {
-                                Some(&ae.value)
-                            }
-                        },
-                        None => None,
+                    true => {
+                        let val = &self.0[index.index as usize];
+                        if allocator.entries[index.index as usize].generation != index.generation {
+                            Err(GenerationalIndexError::GenerationMismatch)
+                        } else {
+                            Ok(val)
+                        }
                     },
-                    false => None
+                    false => Err(GenerationalIndexError::NotLive)
                 }
-                Err(_) => None,
+                Err(e) => Err(e),
             }
         }   
     }
 
     /// Mutably gets the value for some generational index, the generation must match AND this index must be live in the passed-in allocator.
-    pub fn get_mut(&mut self, index: &GenerationalIndex, allocator: &GenerationalIndexAllocator) -> Option<&mut T> {
+    pub fn get_mut(&mut self, index: &GenerationalIndex, allocator: &GenerationalIndexAllocator) -> Result<&mut T, GenerationalIndexError> {
         if index.index >= self.0.len() as IndexType {
-            None
+            Err(GenerationalIndexError::IndexOOB)
         } else {
             match allocator.is_live(&index) {
                 Ok(alive) => match alive {
-                    true => match &mut self.0[index.index as usize] {
-                        Some(ae) => {
-                            if index.generation != ae.generation {
-                                None
-                            } else {
-                                Some(&mut ae.value)
-                            }
-                        },
-                        None => None,
+                    true => {
+                        let val = &mut self.0[index.index as usize];
+                        if index.generation != allocator.entries[index.index as usize].generation {
+                            Err(GenerationalIndexError::GenerationMismatch)
+                        } else {
+                            Ok(val)
+                        }
                     },
-                    false => None
+                    false => Err(GenerationalIndexError::NotLive)
                 }
-                Err(_) => None,
+                Err(e) => Err(e),
             }
         }   
     }
